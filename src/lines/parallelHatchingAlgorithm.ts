@@ -1,5 +1,5 @@
 import { GLOBUS } from "../globus.ts";
-import { LonLat } from "@openglobus/og";
+import { LonLat, Ellipsoid } from "@openglobus/og";
 
 // --- Вспомогательные функции ---
 
@@ -32,6 +32,48 @@ function getPerpendicularBearing(baseBearing: number, direction: 'left' | 'right
     }
     return normalizeAngle(perpendicular);
 }
+
+/**
+ * Интерфейс для охватывающего прямоугольника.
+ */
+interface BoundingBox {
+    minLon: number;
+    minLat: number;
+    maxLon: number;
+    maxLat: number;
+}
+
+/**
+ * Вычисляет охватывающий прямоугольник (Bounding Box) для полигона.
+ * @param polygon - Массив точек LonLat, представляющих полигон.
+ * @returns Объект BoundingBox.
+ */
+function getBoundingBox(polygon: LonLat[]): BoundingBox {
+    if (polygon.length === 0) {
+        // В реальном приложении здесь лучше выбросить ошибку или вернуть undefined/null
+        // и обработать это соответствующим образом.
+        // Для текущей задачи, если polygonLonLatArray пуст, функция createParallelHatching вернет пустой массив ранее.
+        // Этот случай здесь для полноты функции getBoundingBox.
+        console.error("Polygon is empty, cannot calculate bounding box reliably.");
+        return { minLon: 0, minLat: 0, maxLon: 0, maxLat: 0 }; // или throw error
+    }
+
+    let minLon = polygon[0].lon;
+    let minLat = polygon[0].lat;
+    let maxLon = polygon[0].lon;
+    let maxLat = polygon[0].lat;
+
+    for (let i = 1; i < polygon.length; i++) {
+        const point = polygon[i];
+        if (point.lon < minLon) minLon = point.lon;
+        if (point.lat < minLat) minLat = point.lat;
+        if (point.lon > maxLon) maxLon = point.lon;
+        if (point.lat > maxLat) maxLat = point.lat;
+    }
+
+    return { minLon, minLat, maxLon, maxLat };
+}
+
 
 // --- Основная функция ---
 
