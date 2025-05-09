@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 
 .idea/
+
+# Project specific ignores
+package-lock.json
+media/example.mp4
