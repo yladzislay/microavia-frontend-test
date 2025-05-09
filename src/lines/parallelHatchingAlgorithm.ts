@@ -22,7 +22,7 @@ function normalizeAngle(angle: number): number {
  * @param direction - Направление смещения ('left' или 'right' относительно базового азимута). По умолчанию 'right'.
  * @returns Перпендикулярный азимут в градусах [0, 360).
  */
-// @ts-ignore: Пока не используется, но понадобится позже (возможно, для UI или др. логики)
+// @ts-ignore: Пока не используется
 function getPerpendicularBearing(baseBearing: number, direction: 'left' | 'right' = 'right'): number {
     const normalizedBase = normalizeAngle(baseBearing);
     let perpendicular: number;
