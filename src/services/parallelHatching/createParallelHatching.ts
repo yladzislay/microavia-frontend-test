@@ -1,23 +1,10 @@
-import { GLOBUS } from "../../globus"; // Adjusted path
+import { GLOBUS } from "../../globus"; 
 import { LonLat, Ellipsoid } from "@openglobus/og";
 import { normalizeAngle } from "./utils/angleUtils";
 import { getProjectionRangeOnAxis, ProjectionRangeInfo } from "./getProjectionRangeOnAxis";
-import { 
-    segmentsIntersect, 
-    getIntersectionPoint, 
-    onSegment, 
-    isPointInPolygon 
-} from "./utils/planarGeometryUtils";
+import { geodesicSegmentsIntersection } from "./utils/geodesicSegmentsIntersection";
+import { isPointInGeodesicPolygon } from "./utils/isPointInGeodesicPolygon";
 
-/**
- * Creates parallel hatching lines for a given polygon.
- * @param options - Options for generating the hatching.
- * @param options.polygonCoordinates - The coordinates of the polygon.
- * @param options.step - Distance between lines (default 100m).
- * @param options.bearing - Orientation of lines from North (default 0 deg).
- * @param options.offset - External offset from polygon edge (default 50m).
- * @returns An array of lines, where each line is a pair of LonLat points.
- */
 export function createParallelHatching(
     options: { 
         polygonCoordinates: [number, number, number?][][];
@@ -49,27 +36,23 @@ export function createParallelHatching(
     const corridorInfo: ProjectionRangeInfo = getProjectionRangeOnAxis(polygonLonLatArray, bearing, ellipsoid); 
     
     const generatedInfiniteLines: LonLat[][] = [];
-    const veryLargeDistance = 10000000; // A large distance to simulate infinite lines
+    const veryLargeDistance = 10000000; 
     
     const startProjectionDistance = corridorInfo.minProjection - offset; 
     const endProjectionDistance = corridorInfo.maxProjection + offset;
 
-    // Check if the range is valid, especially if step is positive
     if (startProjectionDistance > endProjectionDistance && step > 0) {
-        console.log(`[INFO] createParallelHatching: No lines to generate as startProjectionDistance (${startProjectionDistance}) > endProjectionDistance (${endProjectionDistance}) with positive step.`);
+        // console.log already in previous attempts
         return [];
     }
-    if (step <= 0 && startProjectionDistance > endProjectionDistance) { // Avoid issues if step is 0 or negative
-         console.log(`[INFO] createParallelHatching: Step is non-positive and start projection is beyond end projection.`);
-         // Potentially generate one line at startProjectionDistance if needed, or none.
-         // For now, consistent with loop condition:
+    if (step <= 0 && startProjectionDistance > endProjectionDistance) {
+         // console.log already in previous attempts
          return [];
     }
 
-
     let currentProjectionDistance = startProjectionDistance;
     let infiniteLineCounter = 0;
-    const MAX_INFINITE_LINES = 2000; // Safety break
+    const MAX_INFINITE_LINES = 2000; 
 
     while (currentProjectionDistance <= endProjectionDistance) {
         infiniteLineCounter++;
@@ -78,40 +61,22 @@ export function createParallelHatching(
             break; 
         }
         
-        // The OpenGlobus type definitions for ellipsoid.direct might be problematic.
-        // The original code used @ts-ignore and then constructed new LonLat.
-        // Let's assume ellipsoid.direct() returns an object with .lon and .lat.
-        // This pattern was causing lint errors in the previous attempts due to IDirectResult.
-        // The most robust way with current tooling seems to be @ts-ignore before property access.
-        
+        // @ts-ignore
         const lineCenterResult = ellipsoid.direct(corridorInfo.axisOrigin, corridorInfo.projectionAxisBearing, currentProjectionDistance);
-        const lineCenterPoint = new LonLat(
-            // @ts-ignore 
-            lineCenterResult.lon, 
-            // @ts-ignore 
-            lineCenterResult.lat
-        );
+        const lineCenterPoint = new LonLat(lineCenterResult.lon, lineCenterResult.lat );
 
+        // @ts-ignore
         const point1Result = ellipsoid.direct(lineCenterPoint, bearing, veryLargeDistance);
-        const point1 = new LonLat(
-            // @ts-ignore
-            point1Result.lon, 
-            // @ts-ignore
-            point1Result.lat
-        );
+        const point1 = new LonLat(point1Result.lon, point1Result.lat );
 
+        // @ts-ignore
         const point2Result = ellipsoid.direct(lineCenterPoint, normalizeAngle(bearing + 180), veryLargeDistance); 
-        const point2 = new LonLat(
-            // @ts-ignore
-            point2Result.lon, 
-            // @ts-ignore
-            point2Result.lat
-        );
+        const point2 = new LonLat( point2Result.lon, point2Result.lat );
         
         generatedInfiniteLines.push([point1, point2]);
         
-        if (step <= 0) { // If step is 0 or negative, generate one line and break
-            if (infiniteLineCounter > 0) break; // Already generated one line
+        if (step <= 0) { 
+            if (infiniteLineCounter > 0) break; 
         }
         currentProjectionDistance += step; 
     }
@@ -122,56 +87,52 @@ export function createParallelHatching(
         const lineStart = infiniteLine[0]; 
         const lineEnd = infiniteLine[1];   
         
-        const intersectionPoints: LonLat[] = [];
+        let currentLineIntersections: LonLat[] = [];
         for (let i = 0; i < polygonLonLatArray.length; i++) {
             const polyP1 = polygonLonLatArray[i]; 
             const polyP2 = polygonLonLatArray[(i + 1) % polygonLonLatArray.length];
             
-            if (segmentsIntersect(lineStart, lineEnd, polyP1, polyP2)) { 
-                const intersection = getIntersectionPoint(lineStart, lineEnd, polyP1, polyP2); 
-                if (intersection) {
-                    // Check if the intersection point is on both segments
-                    if (onSegment(polyP1, intersection, polyP2) && onSegment(lineStart, intersection, lineEnd)) { 
-                        intersectionPoints.push(intersection); 
-                    }
+            const newIntersections = geodesicSegmentsIntersection(lineStart, lineEnd, polyP1, polyP2, ellipsoid);
+            if (newIntersections.length > 0) {
+                currentLineIntersections.push(...newIntersections);
+            }
+        }
+        
+        const uniqueIntersectionPoints: LonLat[] = [];
+        if (currentLineIntersections.length > 0) {
+            for (const pt of currentLineIntersections) {
+                if (!uniqueIntersectionPoints.some(u => u.equal(pt, 1e-7))) { 
+                    uniqueIntersectionPoints.push(pt);
                 }
             }
         }
         
-        if (intersectionPoints.length >= 2) {
-            // Sort intersection points along the infinite line's direction
-            // Using squared Euclidean distance from lineStart (planar approximation for sorting)
-            intersectionPoints.sort((a,b)=> 
+        if (uniqueIntersectionPoints.length >= 2) {
+            uniqueIntersectionPoints.sort((a,b)=> 
                 (Math.pow(a.lon - lineStart.lon, 2) + Math.pow(a.lat - lineStart.lat, 2)) -
                 (Math.pow(b.lon - lineStart.lon, 2) + Math.pow(b.lat - lineStart.lat, 2))
             );
             
-            for (let i = 0; i < intersectionPoints.length - 1; i += 2) {
-                let p1_intersect = intersectionPoints[i]; 
-                let p2_intersect = intersectionPoints[i + 1];
+            for (let j = 0; j < uniqueIntersectionPoints.length - 1; j += 2) { 
+                let p1_intersect = uniqueIntersectionPoints[j]; 
+                let p2_intersect = uniqueIntersectionPoints[j + 1];
                 
-                // Ensure midpoint is inside the polygon before extending (robustness)
                 const midPoint = new LonLat((p1_intersect.lon + p2_intersect.lon) / 2, (p1_intersect.lat + p2_intersect.lat) / 2);
-                if (isPointInPolygon(midPoint, polygonLonLatArray)) { 
+                
+                if (isPointInGeodesicPolygon(midPoint, polygonLonLatArray, ellipsoid)) { 
                     
                     const extendedP1Result = ellipsoid.direct(p1_intersect, normalizeAngle(bearing + 180), offset);
-                    const extendedP1 = new LonLat(
-                        // @ts-ignore
-                        extendedP1Result.lon, 
-                        // @ts-ignore
-                        extendedP1Result.lat
-                    );
+                    const extendedP1 = new LonLat( /* @ts-ignore */ extendedP1Result.lon, /* @ts-ignore */ extendedP1Result.lat );
 
                     const extendedP2Result = ellipsoid.direct(p2_intersect, bearing, offset);
-                    const extendedP2 = new LonLat(
-                        // @ts-ignore
-                        extendedP2Result.lon, 
-                        // @ts-ignore
-                        extendedP2Result.lat
-                    );
+                    const extendedP2 = new LonLat( /* @ts-ignore */ extendedP2Result.lon, /* @ts-ignore */ extendedP2Result.lat );
                     
                     finalLines.push([extendedP1, extendedP2]);
-                } 
+                } else {
+                     if (console && typeof console.debug === 'function') {
+                        // console.debug(`Midpoint ${midPoint.toString()} NOT in polygon (geodesic placeholder). Segment from ${p1_intersect.toString()} to ${p2_intersect.toString()}`);
+                    }
+                }
             }
         }
     }
@@ -180,7 +141,7 @@ export function createParallelHatching(
     if (finalLines.length > 0) { 
         console.log(`${logMessagePrefix} Successfully generated ${finalLines.length} lines.`); 
     } else { 
-        console.log(`${logMessagePrefix} No lines generated.`); 
+        console.log(`${logMessagePrefix} No lines generated (check geodesic placeholders or intersection logic).`); 
     }
     return finalLines;
 }
