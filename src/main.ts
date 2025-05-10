@@ -3,8 +3,11 @@ import {GLOBUS} from "./globus.ts";
 import {Polygon} from "./polygons/polygon.ts";
 import {POLYGONS_LAYER} from "./polygons/layer.ts";
 import {LINE_LAYER} from "./lines/layer.ts";
-import {createParallelHatching} from "./lines/parallelHatchingAlgorithm.ts";
+// {{change 1: Update import path for createParallelHatching}}
+import {createParallelHatching} from "./services/parallelHatching/createParallelHatching.ts";
 import {Line} from "./lines/line.ts";
+// {{change 1: Remove unused LonLat import}}
+// import { LonLat } from '@openglobus/og'; 
 
 GLOBUS.planet.addLayer(POLYGONS_LAYER)
 GLOBUS.planet.addLayer(LINE_LAYER)
