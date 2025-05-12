@@ -8,7 +8,7 @@ export class Line extends Entity {
             geometry: {
                 type: 'LINESTRING',
                 style: {
-                    lineWidth: 10,
+                lineWidth: 10,
                     lineColor: '#ff0000'
                 },
                 coordinates

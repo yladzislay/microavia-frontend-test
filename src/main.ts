@@ -1,3 +1,4 @@
+// src/main.ts
 import './style.css'
 import {GLOBUS} from "./globus.ts";
 import {Polygon} from "./polygons/polygon.ts";
@@ -13,19 +14,14 @@ POLYGONS_LAYER.events.on('ldblclick', (e: any) => {
     try {
         if (e.pickingObject instanceof Polygon) {
             const polygon = e.pickingObject,
-                coordinates = polygon.coordinates;
+                coordinates = polygon.coordinates[0].map((p: any) => [p[0], p[1]]); 
 
             LINE_LAYER.clear()
-            createParallelHatching(coordinates).map((line) => {
+            const result = createParallelHatching(coordinates, 100, 0, 50);
+            console.log("createParallelHatching result:", result);
 
-                for (let i = 0; i < line.length; i += 2) {
-                    const ll1 = line[i];
-                    const ll2 = line[i + 1];
-                    if (ll1 && ll2) {
-                        LINE_LAYER.add(new Line([[ll1.lon, ll1.lat], [ll2.lon, ll2.lat]]))
-                    }
-                }
-
+            result.map((line: any) => {
+                LINE_LAYER.add(new Line(line.map((p: any) => [p[0], p[1]])))
             })
         }
     } catch (e) {
@@ -38,5 +34,5 @@ if (entities && entities.length > 0) {
     const lastPoly = entities.pop(),
         extent = lastPoly?.getExtent()
 
-    extent && GLOBUS.planet.camera.flyExtent(extent)
+    extent && GLOBUS.planet.camera.viewExtent(extent)
 }

@@ -1,74 +1,75 @@
-import { GLOBUS } from "../globus.ts";
 import { LonLat } from "@openglobus/og";
-
-// --- Вспомогательные функции ---
-
-/**
- * Нормализует азимут к диапазону [0, 360) градусов.
- * @param angle - Угол в градусах.
- * @returns Нормализованный угол в градусах.
- */
-function normalizeAngle(angle: number): number {
-    let normalized = angle % 360;
-    if (normalized < 0) {
-        normalized += 360;
-    }
-    return normalized;
-}
-
-/**
- * Вычисляет азимут, перпендикулярный заданному.
- * @param baseBearing - Базовый азимут в градусах.
- * @param direction - Направление смещения ('left' или 'right' относительно базового азимута). По умолчанию 'right'.
- * @returns Перпендикулярный азимут в градусах [0, 360).
- */
-function getPerpendicularBearing(baseBearing: number, direction: 'left' | 'right' = 'right'): number {
-    const normalizedBase = normalizeAngle(baseBearing);
-    let perpendicular: number;
-    if (direction === 'right') {
-        perpendicular = normalizedBase + 90;
-    } else { // 'left'
-        perpendicular = normalizedBase - 90;
-    }
-    return normalizeAngle(perpendicular);
-}
-
-// --- Основная функция ---
+import * as turf from "@turf/turf";
 
 export function createParallelHatching(
-    coordinates: [number, number, number?][][],
-    step: number = 100,
-    bearing: number = 0,
-    offset: number = 50
-): LonLat[][] {
-    // Извлечение параметров (шаг, азимут, отступ уже имеют значения по умолчанию)
-    // Входящий `coordinates` — это `polygon.coordinates` (массив колец).
-    // Для работы с внешним контуром полигона (согласно требованиям "без отверстий")
-    // внутри функции необходимо использовать `coordinates[0]`.
-    if (!coordinates || coordinates.length === 0 || !coordinates[0] || coordinates[0].length === 0) {
-        console.error("Polygon coordinates are empty or invalid.");
-        return [];
+    polygonCoordinates: number[][],
+    step: number,
+    bearing: number,
+    offset: number
+): LonLat[][][] {
+
+    console.log("🚀 Input parameters:", { polygonCoordinates, step, bearing, offset });
+
+    // 1: Polygon
+    const polygonFeature = turf.polygon([polygonCoordinates]);
+    const polygonCentroidPoint = turf.centroid(polygonFeature);
+    const normalizedBearing = bearing % 360;
+    const rotatedPolygon = turf.transformRotate(polygonFeature, -normalizedBearing, { pivot: polygonCentroidPoint });
+
+    // 2: Polygon Bounding Box
+    const polygonBoundingBox = turf.bbox(rotatedPolygon);
+    const [minX, minY, maxX, maxY] = polygonBoundingBox;
+    console.log("📦 Bounding Box:", polygonBoundingBox);
+
+    // 3: Generating Parallel Vertical Lines inside the Polygon Bounding Box
+    const xPadding = (offset > 0 ? offset * 1.1 : step * 0.5) + step * 0.5;
+    const yPadding = (maxY - minY) * 0.05 + 0.01;
+    const referenceLat = (minY + maxY) / 2;
+
+    const limitX = turf.destination(turf.point([maxX, referenceLat]), xPadding, 90, { units: 'meters' }).geometry.coordinates[0];
+    let currentX = turf.destination(turf.point([minX, referenceLat]), xPadding, 270, { units: 'meters' }).geometry.coordinates[0];
+    const [lineStartY, lineEndY] = [minY - yPadding, maxY + yPadding];
+
+    const verticalParallelLines: any[] = [];
+
+    while (currentX < limitX) {
+        verticalParallelLines.push(turf.lineString([[currentX, lineStartY], [currentX, lineEndY]]));
+        currentX = turf.destination(turf.point([currentX, referenceLat]), step, 90, { units: 'meters' }).geometry.coordinates[0];
     }
-    const outerRingRawCoordinates = coordinates[0];
 
-    // Преобразование `outerRingRawCoordinates` в массив экземпляров `LonLat[]`.
-    // Высоту передаем, если она есть; для 2D расчетов она может не использоваться.
-    const polygonLonLatArray: LonLat[] = outerRingRawCoordinates.map(p => new LonLat(p[0], p[1], p[2]));
+    console.log("📏 Vertical Parallel Lines have been generated. | Count: ", verticalParallelLines.length);
 
-    if (polygonLonLatArray.length < 3) {
-        console.error("Polygon must have at least 3 vertices.");
-        return [];
-    }
+    // 4: Clipping Vertical Parallel Lines
+    const clippedVerticalParallelLines = verticalParallelLines.flatMap(line =>
+        turf.lineSplit(line, rotatedPolygon).features.filter(segment =>
+            turf.booleanPointInPolygon(
+                turf.midpoint(
+                    turf.point(segment.geometry.coordinates[0]),
+                    turf.point(segment.geometry.coordinates.slice(-1)[0])),
+                rotatedPolygon
+            )
+        )
+    );
 
-    // TODO: implement parallel hatching algorithm
-    console.log("createParallelHatching called with (defaults applied):", {
-        step,
-        bearing,
-        offset
+    console.log("✂️ Vertical Parallel Lines Clipping Finished. | Count: ", clippedVerticalParallelLines.length);
+
+    // 5: Applying Offset to the Clipped Lines
+    const offsettedVerticalParallelLines = offset === 0 ? clippedVerticalParallelLines : clippedVerticalParallelLines.map(line => {
+        const [start, end] = line.geometry.coordinates;
+        const lineAzimuth = turf.bearing(turf.point(start), turf.point(end));
+        return turf.lineString([
+            turf.destination(turf.point(start), offset, lineAzimuth - 180, { units: 'meters' }).geometry.coordinates,
+            turf.destination(turf.point(end), offset, lineAzimuth, { units: 'meters' }).geometry.coordinates
+        ]);
     });
-    console.log("Outer ring LonLat coordinates:", polygonLonLatArray);
-    console.log("Ellipsoid for calculations:", GLOBUS.planet.ellipsoid);
 
-    // Временный возврат пустого массива, пока алгоритм не реализован
-    return [];
+    // 6: Rotating Back to the original bearing
+    const parallelLines = offsettedVerticalParallelLines.map(line => turf.transformRotate(line, normalizedBearing, { pivot: polygonCentroidPoint }));
+    
+    // 7: Extracting coordinates
+    const parallelLinesCoordinates = parallelLines.map(line => turf.getCoords(line) as LonLat[][]);
+
+    console.log("🏁 Done. | Resulting Lines Count:", parallelLinesCoordinates.length);
+
+    return parallelLinesCoordinates;
 }
