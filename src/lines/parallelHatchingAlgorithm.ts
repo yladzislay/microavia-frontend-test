@@ -1,4 +1,3 @@
-import { LonLat } from "@openglobus/og";
 import * as turf from "@turf/turf";
 
 export function createParallelHatching(
@@ -6,7 +5,7 @@ export function createParallelHatching(
     step: number,
     bearing: number,
     offset: number
-): LonLat[][][] {
+): [number, number][][] {
 
     console.log("🚀 Input parameters:", { polygonCoordinates, step, bearing, offset });
 
@@ -65,9 +64,9 @@ export function createParallelHatching(
 
     // 6: Rotating Back to the original bearing
     const parallelLines = offsettedVerticalParallelLines.map(line => turf.transformRotate(line, normalizedBearing, { pivot: polygonCentroidPoint }));
-    
+
     // 7: Extracting coordinates
-    const parallelLinesCoordinates = parallelLines.map(line => turf.getCoords(line) as LonLat[][]);
+    const parallelLinesCoordinates: [number, number][][] = parallelLines.map(line => turf.getCoords(line).map(([lon, lat]: number[]) => [lon, lat]));
 
     console.log("🏁 Done. | Resulting Lines Count:", parallelLinesCoordinates.length);
 
